@@ -1,6 +1,14 @@
 ---
 ###### Group Vars for ILO Provisioning ########
-###### ESXI info
+
+###### OS Detection for paths ########
+# These paths are auto-detected based on OS. Override if needed.
+# Linux: /home/deploy, macOS: /opt/esxi-deploy
+deploy_base_path: "{{ '/opt/esxi-deploy' if ansible_facts['os_family'] == 'Darwin' else '/home/deploy' }}"
+iso_stage_path: "{{ '/opt/stageiso' if ansible_facts['os_family'] == 'Darwin' else '/home/stageiso' }}"
+mount_base_path: "{{ '/Volumes/esxi-mount' if ansible_facts['os_family'] == 'Darwin' else '/mnt' }}"
+
+###### ESXI info ########
 # Passwords are loaded from environment variables or vault
 # Set: export ESXI_ROOT_PASSWORD='your_password'
 # Or use: ansible-playbook ... --ask-vault-pass (with secrets.yml)
@@ -21,11 +29,11 @@ ilo_pass: "{{ lookup('env', 'ILO_PASSWORD') | default(vault_ilo_pass, true) }}"
 ilo_state: boot_once
 
 ###### Path on Remote server (ISO Name)
-src_iso_file: VMware-ESXi-8.0.2-22380479-HPE-802.0.0.11.5.0.6-Oct2023.iso
+src_iso_file: VMware-VMvisor-Installer-8.0.0.update02-23305546.x86_64-Dell_Customized-A06.iso
 
 ###### Web Server Configuration for ISO serving
 # Update this with your web server URL and port
-# The web server should serve files from /home/stageiso/ directory
+# Linux: /home/stageiso/, macOS: /opt/stageiso/
 iso_web_server: //10.201.1.103/iso
 # Alternative examples:
 # iso_web_server: http://192.168.1.100:8080

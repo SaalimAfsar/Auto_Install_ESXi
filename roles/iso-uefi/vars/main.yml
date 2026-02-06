@@ -1,3 +1,3 @@
 ---
-
-iso_path: /home/stageiso/
+# Use OS-aware paths from group_vars, with fallback defaults
+iso_path: "{{ iso_stage_path | default('/home/stageiso') }}"

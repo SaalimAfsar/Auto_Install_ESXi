@@ -1,9 +1,29 @@
 ---
 
-- name: Unmount ISO & Clean Deploy Folders expcept StageISO Files 
+# Linux: Unmount using umount
+- name: Unmount ISO & Clean Deploy Folders (Linux)
   shell: |
-          sudo umount /mnt/{{ item.hostName }}
-          sudo rm -rf {{ file_path }}/{{ item.hostName }}
-          sudo rm -rf /mnt/*
+    umount {{ mount_path }}/{{ item.hostName }} 2>/dev/null || true
+    rm -rf {{ file_path }}/{{ item.hostName }}
+    rm -rf {{ mount_path }}/{{ item.hostName }}
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"
+  become: "{{ ansible_facts['os_family'] != 'Darwin' }}"
+  when: ansible_facts['os_family'] != 'Darwin'
+
+# macOS: Unmount using hdiutil detach
+- name: Unmount ISO & Clean Deploy Folders (macOS)
+  shell: |
+    # Read the actual mount point if stored
+    if [ -f "{{ file_path }}/{{ item.hostName }}/.mount_point" ]; then
+      MOUNT_POINT=$(cat "{{ file_path }}/{{ item.hostName }}/.mount_point")
+      hdiutil detach "$MOUNT_POINT" -force 2>/dev/null || true
+    fi
+    # Also try common patterns
+    hdiutil detach "/Volumes/DEL-ESXI"* -force 2>/dev/null || true
+    hdiutil detach "/Volumes/ESXI"* -force 2>/dev/null || true
+    # Clean up staging directories
+    rm -rf "{{ file_path }}/{{ item.hostName }}"
+  with_items:
+    - "{{ hosts }}"
+  when: ansible_facts['os_family'] == 'Darwin'

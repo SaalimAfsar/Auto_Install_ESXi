@@ -1,6 +1,7 @@
 #!/bin/bash
 # Setup script for Auto_Install_ESXi Ansible project
 # This script installs all required dependencies and sets up the environment
+# Supports: Ubuntu, Debian, RHEL, CentOS, Fedora, and macOS
 
 # Don't exit on errors - we'll handle them gracefully
 set +e
@@ -10,25 +11,48 @@ echo "Auto_Install_ESXi Setup Script"
 echo "========================================="
 echo ""
 
-# Check if running as root or with sudo
-if [ "$EUID" -ne 0 ]; then 
-    echo "This script requires sudo privileges. Please run with sudo or as root."
-    echo "Usage: sudo ./setup.sh"
-    exit 1
-fi
-
 # Detect OS
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-    VER=$VERSION_ID
-else
-    echo "Cannot detect OS. Exiting."
-    exit 1
-fi
+detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+        VER=$(sw_vers -productVersion)
+        ARCH=$(uname -m)
+    elif [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+        VER=$VERSION_ID
+        ARCH=$(uname -m)
+    else
+        echo "Cannot detect OS. Exiting."
+        exit 1
+    fi
+}
 
-echo "Detected OS: $OS $VER"
+detect_os
+echo "Detected OS: $OS $VER ($ARCH)"
 echo ""
+
+# Check if running as root or with sudo (not required for macOS Homebrew)
+if [ "$OS" != "macos" ]; then
+    if [ "$EUID" -ne 0 ]; then
+        echo "This script requires sudo privileges. Please run with sudo or as root."
+        echo "Usage: sudo ./setup.sh"
+        exit 1
+    fi
+else
+    # macOS - check if Homebrew is installed
+    if ! command -v brew &> /dev/null; then
+        echo "Homebrew is not installed. Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        # Add Homebrew to PATH for Apple Silicon
+        if [[ "$ARCH" == "arm64" ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+        else
+            eval "$(/usr/local/bin/brew shellenv)"
+        fi
+    fi
+    echo "Homebrew is available: $(brew --version | head -n 1)"
+fi
 
 # Function to update apt with error handling
 update_apt() {
@@ -55,8 +79,10 @@ if command -v python3 &> /dev/null; then
     echo "Python3 is already installed: $(python3 --version)"
     # Check if pip3 is available, if not install it
     if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &> /dev/null; then
-        echo "pip3 not found. Installing python3-pip..."
-        if [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
+        echo "pip3 not found. Installing..."
+        if [ "$OS" == "macos" ]; then
+            brew install python3
+        elif [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
             update_apt
             apt-get install -y python3-pip
         elif [ "$OS" == "rhel" ] || [ "$OS" == "centos" ] || [ "$OS" == "fedora" ]; then
@@ -68,7 +94,9 @@ if command -v python3 &> /dev/null; then
         fi
     fi
 else
-    if [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
+    if [ "$OS" == "macos" ]; then
+        brew install python3
+    elif [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
         update_apt
         apt-get install -y python3 python3-pip python3-venv
     elif [ "$OS" == "rhel" ] || [ "$OS" == "centos" ] || [ "$OS" == "fedora" ]; then
@@ -95,18 +123,28 @@ fi
 
 # Install system packages required for ISO generation
 echo ""
-echo "Step 2: Installing system packages (mkisofs, isohybrid, etc.)..."
-if [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
+echo "Step 2: Installing system packages (mkisofs/genisoimage, xorriso, etc.)..."
+if [ "$OS" == "macos" ]; then
+    echo "Installing macOS packages via Homebrew..."
+    brew install cdrtools || {
+        echo "Warning: Failed to install cdrtools (provides mkisofs)"
+    }
+    brew install xorriso || {
+        echo "Warning: Failed to install xorriso"
+    }
+    # Note: isohybrid is not available on macOS, xorriso provides similar functionality
+    echo "Note: macOS uses mkisofs (from cdrtools) and xorriso instead of genisoimage/isohybrid"
+elif [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
     update_apt
-    apt-get install -y genisoimage syslinux-utils || {
+    apt-get install -y genisoimage syslinux-utils xorriso || {
         echo "Warning: Some packages may have failed to install due to repository issues."
         echo "You may need to fix repository GPG keys manually."
     }
 elif [ "$OS" == "rhel" ] || [ "$OS" == "centos" ] || [ "$OS" == "fedora" ]; then
     if [ "$OS" == "fedora" ]; then
-        dnf install -y genisoimage syslinux
+        dnf install -y genisoimage syslinux xorriso
     else
-        yum install -y genisoimage syslinux
+        yum install -y genisoimage syslinux xorriso
     fi
 fi
 
@@ -116,7 +154,13 @@ echo "Step 3: Installing Ansible..."
 if command -v ansible &> /dev/null; then
     echo "Ansible is already installed: $(ansible --version | head -n 1)"
 else
-    if [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
+    if [ "$OS" == "macos" ]; then
+        echo "Installing Ansible via Homebrew..."
+        brew install ansible || {
+            echo "Warning: Homebrew install failed. Trying pip installation..."
+            $PIP_CMD install ansible
+        }
+    elif [ "$OS" == "ubuntu" ] || [ "$OS" == "debian" ]; then
         apt-get install -y software-properties-common || true
         apt-add-repository --yes --update ppa:ansible/ansible || {
             echo "Warning: Failed to add Ansible PPA. Trying alternative installation method..."
@@ -144,21 +188,30 @@ fi
 # Install Python packages
 echo ""
 echo "Step 4: Installing Python packages (pyvmomi, VMware SDK, python-hpilo)..."
-$PIP_CMD install --upgrade pip || {
+
+# macOS with Homebrew Python requires --break-system-packages or --user flag
+# due to PEP 668 externally-managed-environment restriction
+if [ "$OS" == "macos" ]; then
+    PIP_EXTRA_ARGS="--break-system-packages"
+    echo "Note: Using --break-system-packages flag for Homebrew Python (PEP 668)"
+else
+    PIP_EXTRA_ARGS=""
+fi
+
+$PIP_CMD install --upgrade pip $PIP_EXTRA_ARGS || {
     echo "Warning: Failed to upgrade pip. Continuing..."
 }
-$PIP_CMD install pyvmomi || {
-    echo "Error: Failed to install pyvmomi. Please check your internet connection."
-    echo "You can try installing manually: $PIP_CMD install pyvmomi"
-    exit 1
+$PIP_CMD install pyvmomi $PIP_EXTRA_ARGS || {
+    echo "Warning: Failed to install pyvmomi."
+    echo "You can try installing manually: $PIP_CMD install pyvmomi $PIP_EXTRA_ARGS"
 }
-$PIP_CMD install git+https://github.com/vmware/vsphere-automation-sdk-python.git || {
+$PIP_CMD install git+https://github.com/vmware/vsphere-automation-sdk-python.git $PIP_EXTRA_ARGS || {
     echo "Warning: Failed to install VMware SDK. You may need to install it manually."
-    echo "You can try: $PIP_CMD install git+https://github.com/vmware/vsphere-automation-sdk-python.git"
+    echo "You can try: $PIP_CMD install git+https://github.com/vmware/vsphere-automation-sdk-python.git $PIP_EXTRA_ARGS"
 }
-$PIP_CMD install python-hpilo || {
+$PIP_CMD install python-hpilo $PIP_EXTRA_ARGS || {
     echo "Warning: Failed to install python-hpilo. This is required for iLO operations."
-    echo "You can try: $PIP_CMD install python-hpilo"
+    echo "You can try: $PIP_CMD install python-hpilo $PIP_EXTRA_ARGS"
 }
 
 # Install Ansible collections
@@ -180,13 +233,40 @@ fi
 # Create necessary directories
 echo ""
 echo "Step 6: Creating required directories..."
-mkdir -p /home/deploy/isosrc
-mkdir -p /home/deploy/baremetal
-mkdir -p /home/stageiso
-mkdir -p /mnt
-chmod 755 /home/deploy/isosrc
-chmod 755 /home/deploy/baremetal
-chmod 755 /home/stageiso
+if [ "$OS" == "macos" ]; then
+    # macOS uses /opt/esxi-deploy as base path (more conventional for macOS)
+    DEPLOY_BASE="/opt/esxi-deploy"
+    STAGEISO_PATH="/opt/stageiso"
+    MNT_PATH="/Volumes/esxi-mount"
+
+    sudo mkdir -p "$DEPLOY_BASE/isosrc"
+    sudo mkdir -p "$DEPLOY_BASE/baremetal"
+    sudo mkdir -p "$STAGEISO_PATH"
+    sudo mkdir -p "$MNT_PATH"
+    sudo chmod 755 "$DEPLOY_BASE/isosrc"
+    sudo chmod 755 "$DEPLOY_BASE/baremetal"
+    sudo chmod 755 "$STAGEISO_PATH"
+    sudo chmod 755 "$MNT_PATH"
+    # Set ownership to current user for easier access
+    sudo chown -R $(whoami):staff "$DEPLOY_BASE"
+    sudo chown -R $(whoami):staff "$STAGEISO_PATH"
+
+    echo ""
+    echo "macOS Directory Paths:"
+    echo "  Source ISOs:    $DEPLOY_BASE/isosrc/"
+    echo "  Staging:        $DEPLOY_BASE/baremetal/"
+    echo "  Generated ISOs: $STAGEISO_PATH/"
+    echo "  Mount Points:   $MNT_PATH/"
+else
+    # Linux uses /home/deploy as base path
+    mkdir -p /home/deploy/isosrc
+    mkdir -p /home/deploy/baremetal
+    mkdir -p /home/stageiso
+    mkdir -p /mnt
+    chmod 755 /home/deploy/isosrc
+    chmod 755 /home/deploy/baremetal
+    chmod 755 /home/stageiso
+fi
 
 # Create log directory
 mkdir -p $(dirname $(grep "^log_path" ansible.cfg 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "./log/ansible.log"))
@@ -206,9 +286,22 @@ fi
 echo "========================================="
 echo ""
 echo "Next steps:"
-echo "1. Place your ESXi ISO file in: /home/deploy/isosrc/"
-echo "2. Update inventory/group_vars/ilo-esxi with your configuration"
-echo "3. Update inventory/host_vars/ilo-esxi with your server details"
-echo "4. Ensure your web server can serve ISOs from: /home/stageiso/"
-echo "5. Run the playbook: ansible-playbook playbook/00.ilo_iso_esxi.yaml"
+if [ "$OS" == "macos" ]; then
+    echo "1. Place your ESXi ISO file in: /opt/esxi-deploy/isosrc/"
+    echo "2. Update inventory/group_vars/ilo-esxi with your configuration"
+    echo "   - Set deploy_base_path: /opt/esxi-deploy"
+    echo "   - Set iso_stage_path: /opt/stageiso"
+    echo "3. Update inventory/host_vars/ilo-esxi with your server details"
+    echo "4. Ensure your web server can serve ISOs from: /opt/stageiso/"
+    echo "5. Run the playbook: ansible-playbook playbook/00.ilo_iso_esxi.yaml"
+    echo ""
+    echo "Note: macOS uses different paths than Linux. The playbook will"
+    echo "      auto-detect your OS and use the appropriate commands."
+else
+    echo "1. Place your ESXi ISO file in: /home/deploy/isosrc/"
+    echo "2. Update inventory/group_vars/ilo-esxi with your configuration"
+    echo "3. Update inventory/host_vars/ilo-esxi with your server details"
+    echo "4. Ensure your web server can serve ISOs from: /home/stageiso/"
+    echo "5. Run the playbook: ansible-playbook playbook/00.ilo_iso_esxi.yaml"
+fi
 echo ""

@@ -1,12 +1,61 @@
 ---
 
-- name: Mounting ISO & Copy to Directories
-  shell: |
-          mkdir /mnt/{{ item.hostName }}
-          mount -o loop -t iso9660 {{ isosrc }}/{{ src_iso_file }} /mnt/{{ item.hostName }}/
-          mkdir {{ file_path }}/{{ item.hostName }}
-          cp -avRf /mnt/{{ item.hostName }}/* {{ file_path }}/{{ item.hostName }}/
+- name: Create staging directory for host
+  file:
+    path: "{{ file_path }}/{{ item.hostName }}"
+    state: directory
+    mode: '0755'
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"
+
+# Linux: Mount ISO using loop device
+- name: Mount ISO & Copy to Directories (Linux)
+  shell: |
+    mkdir -p {{ mount_path }}/{{ item.hostName }}
+    mount -o loop -t iso9660 {{ isosrc }}/{{ src_iso_file }} {{ mount_path }}/{{ item.hostName }}/
+    cp -avRf {{ mount_path }}/{{ item.hostName }}/* {{ file_path }}/{{ item.hostName }}/
+  with_items:
+    - "{{ hosts }}"
+  when: ansible_facts['os_family'] != 'Darwin'
+
+# macOS: Mount ISO using hdiutil (mounts to /Volumes/<volume_name>)
+- name: Mount ISO & Copy to Directories (macOS)
+  shell: |
+    # Detach any existing mount of this ISO
+    hdiutil detach "{{ mount_path }}/{{ item.hostName }}" 2>/dev/null || true
+
+    # Mount ISO and capture the mount point from hdiutil output
+    MOUNT_OUTPUT=$(hdiutil attach "{{ isosrc }}/{{ src_iso_file }}" -nobrowse -readonly 2>&1)
+    MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep -o '/Volumes/[^[:space:]]*' | tail -1)
+
+    if [ -z "$MOUNT_POINT" ]; then
+      echo "Failed to mount ISO. Output: $MOUNT_OUTPUT"
+      exit 1
+    fi
+
+    echo "ISO mounted at: $MOUNT_POINT"
+
+    # Store mount point for cleanup
+    echo "$MOUNT_POINT" > "{{ file_path }}/{{ item.hostName }}/.mount_point"
+
+    # Copy contents to staging directory
+    cp -Rf "$MOUNT_POINT/"* "{{ file_path }}/{{ item.hostName }}/"
+
+    # Fix permissions (macOS copies may have restricted permissions)
+    chmod -R u+w "{{ file_path }}/{{ item.hostName }}/"
+
+    # Convert uppercase boot.cfg to lowercase for consistency (if needed)
+    if [ -f "{{ file_path }}/{{ item.hostName }}/BOOT.CFG" ] && [ ! -f "{{ file_path }}/{{ item.hostName }}/boot.cfg" ]; then
+      cp "{{ file_path }}/{{ item.hostName }}/BOOT.CFG" "{{ file_path }}/{{ item.hostName }}/boot.cfg"
+    fi
+
+    # Also handle EFI boot.cfg
+    if [ -d "{{ file_path }}/{{ item.hostName }}/EFI/BOOT" ]; then
+      mkdir -p "{{ file_path }}/{{ item.hostName }}/efi/boot"
+      cp -Rf "{{ file_path }}/{{ item.hostName }}/EFI/BOOT/"* "{{ file_path }}/{{ item.hostName }}/efi/boot/" 2>/dev/null || true
+    fi
+  with_items:
+    - "{{ hosts }}"
+  when: ansible_facts['os_family'] == 'Darwin'
 
 

@@ -1,21 +1,99 @@
 ---
 
-- name: Generate bootable ESXi ISO using genisoimage
+# Ensure ISO output directory exists
+- name: Create ISO output directory
+  file:
+    path: "{{ iso_path }}"
+    state: directory
+    mode: '0755'
+
+# Linux: Use genisoimage
+- name: Generate bootable ESXi ISO using genisoimage (Linux)
   shell: >
-          genisoimage
-          -o {{ iso_path }}/{{ item.hostName }}.iso
-          -relaxed-filenames
-          -J
-          -R
-          -V 'ESXI-INSTALLER'
-          -b isolinux.bin
-          -c boot.cat
-          -no-emul-boot
-          -boot-load-size 4
-          -boot-info-table
-          -eltorito-alt-boot
-          -e efiboot.img
-          -no-emul-boot
-          "{{ file_path }}"/{{ item.hostName }}/
+    genisoimage
+    -o {{ iso_path }}/{{ item.hostName }}.iso
+    -relaxed-filenames
+    -J
+    -R
+    -V 'ESXI-INSTALLER'
+    -b isolinux.bin
+    -c boot.cat
+    -no-emul-boot
+    -boot-load-size 4
+    -boot-info-table
+    -eltorito-alt-boot
+    -e efiboot.img
+    -no-emul-boot
+    "{{ file_path }}/{{ item.hostName }}/"
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"
+  when: ansible_facts['os_family'] != 'Darwin'
+
+# macOS: Use xorriso for BIOS+UEFI hybrid ISO
+- name: Generate bootable ESXi ISO using xorriso (macOS)
+  shell: |
+    cd "{{ file_path }}/{{ item.hostName }}"
+
+    # Convert uppercase filenames to lowercase for boot.cfg compatibility
+    # boot.cfg references lowercase paths but ISO9660 files are uppercase
+    # EXCEPT KS.CFG which must stay uppercase (referenced as /KS.CFG in boot.cfg)
+    echo "Converting filenames to lowercase (except KS.CFG)..."
+    for f in *; do
+      if [ -f "$f" ]; then
+        # Skip KS.CFG - it must remain uppercase
+        if [ "$f" = "KS.CFG" ]; then
+          echo "Keeping KS.CFG as uppercase"
+          continue
+        fi
+        LOWER=$(echo "$f" | tr '[:upper:]' '[:lower:]')
+        if [ "$f" != "$LOWER" ]; then
+          mv "$f" "$LOWER" 2>/dev/null || true
+        fi
+      fi
+    done
+
+    # Also handle EFI directory and its contents
+    if [ -d "EFI" ]; then
+      mkdir -p efi/boot
+      if [ -d "EFI/BOOT" ]; then
+        for f in EFI/BOOT/*; do
+          if [ -f "$f" ]; then
+            BASENAME=$(basename "$f" | tr '[:upper:]' '[:lower:]')
+            cp "$f" "efi/boot/$BASENAME" 2>/dev/null || true
+          fi
+        done
+      fi
+      rm -rf EFI
+    fi
+
+    # Verify required files exist
+    if [ ! -f "isolinux.bin" ]; then
+      echo "Error: isolinux.bin not found"
+      ls -la
+      exit 1
+    fi
+
+    # Determine EFI boot image if present
+    EFIBOOT_OPT=""
+    if [ -f "efiboot.img" ]; then
+      EFIBOOT_OPT="-eltorito-alt-boot -e efiboot.img -no-emul-boot"
+    fi
+
+    # Use xorriso to create hybrid bootable ISO
+    xorriso -as mkisofs \
+      -o "{{ iso_path }}/{{ item.hostName }}.iso" \
+      -relaxed-filenames \
+      -J -R \
+      -V 'ESXI-INSTALL' \
+      -b isolinux.bin \
+      -c boot.cat \
+      -no-emul-boot \
+      -boot-load-size 4 \
+      -boot-info-table \
+      $EFIBOOT_OPT \
+      .
+
+    echo "ISO created: {{ iso_path }}/{{ item.hostName }}.iso"
+  with_items:
+    - "{{ hosts }}"
+  when: ansible_facts['os_family'] == 'Darwin'

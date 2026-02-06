@@ -1,4 +1,3 @@
 ---
 # Use OS-aware paths from group_vars, with fallback defaults
 file_path: "{{ deploy_base_path | default('/home/deploy') }}/baremetal"
-

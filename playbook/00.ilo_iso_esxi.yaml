@@ -1,11 +1,11 @@
 ---
 - hosts: localhost
-  gather_facts: no
-  become: yes
+  gather_facts: yes
+  become: no
   vars:
-          - ansible_python_interpreter: /usr/bin/python3
-          - ansible_host_key_checking: no
-          - validate_certs: no
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_host_key_checking: no
+    validate_certs: no
   tasks:
   - name: Load host and group variables
     include_vars:
@@ -22,21 +22,25 @@
     no_log: true
     tags: always
 
-  - name: Verify required passwords are set
+  - name: Verify ESXi root password is set (required for ISO generation)
     fail:
       msg: |
-        Required passwords not set. Use one of these methods:
+        ESXi root password not set. Use one of these methods:
+        1. Environment variable: export ESXI_ROOT_PASSWORD='password'
+        2. Ansible Vault with secrets.yml
+    when: root_password is not defined or root_password == ''
+    tags: iso
+
+  - name: Verify BMC credentials are set (required for provisioning)
+    fail:
+      msg: |
+        BMC credentials not set. Use one of these methods:
         1. Environment variables:
-           export ESXI_ROOT_PASSWORD='password'
+           export ILO_USER='admin'
            export ILO_PASSWORD='password'
-        2. Ansible Vault:
-           cp inventory/group_vars/secrets.yml.example inventory/group_vars/secrets.yml
-           ansible-vault encrypt inventory/group_vars/secrets.yml
-           ansible-playbook playbook/00.ilo_iso_esxi.yaml --ask-vault-pass
-    when: >
-      (root_password is not defined or root_password == '') or
-      (ilo_pass is not defined or ilo_pass == '')
-    tags: always
+        2. Ansible Vault with secrets.yml
+    when: ilo_pass is not defined or ilo_pass == ''
+    tags: ilo
 
   # Note: python-hpilo is only needed for HPE iLO, not Dell iDRAC
   # - name: Ensure python-hpilo is installed system-wide

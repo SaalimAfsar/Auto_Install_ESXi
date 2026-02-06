@@ -1,17 +1,35 @@
 ---
 
-- name: Make ISO file UEFI bootable
+# Linux: Use isohybrid for UEFI compatibility
+- name: Make ISO file UEFI bootable using isohybrid (Linux)
   shell: |
-          isohybrid --uefi {{ iso_path }}/{{ item.hostName }}.iso
+    isohybrid --uefi {{ iso_path }}/{{ item.hostName }}.iso
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"
   ignore_errors: yes
+  when: ansible_facts['os_family'] != 'Darwin'
+
+# macOS: Use xorriso for hybrid ISO (BIOS + UEFI bootable)
+# Note: xorriso modifies ISO in-place to make it hybrid bootable
+- name: Make ISO file UEFI bootable using xorriso (macOS)
+  shell: |
+    xorriso -as mkisofs \
+      -isohybrid-mbr /usr/local/share/syslinux/isohdpfx.bin 2>/dev/null || \
+    xorriso -as mkisofs \
+      -isohybrid-mbr /opt/homebrew/share/syslinux/isohdpfx.bin 2>/dev/null || \
+    echo "Note: Hybrid MBR not applied (syslinux not found). ISO is still UEFI bootable."
+  args:
+    chdir: "{{ iso_path }}"
+  with_items:
+    - "{{ hosts }}"
+  ignore_errors: yes
+  when: ansible_facts['os_family'] == 'Darwin'
 
 - name: Verify ISO was created
   stat:
     path: "{{ iso_path }}/{{ item.hostName }}.iso"
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"
   register: iso_stat
 
 - name: Display ISO info

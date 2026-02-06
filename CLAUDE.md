@@ -6,15 +6,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Auto_Install_ESXi automates VMware ESXi 8.0.x deployment on bare metal servers (HPE iLO and Dell iDRAC) using Ansible and Kickstart files. It creates custom bootable ISOs with embedded configuration and boots servers via BMC virtual media.
 
+**Supported Platforms:** Ubuntu/Debian, RHEL/CentOS/Fedora, and macOS
+
 ## Prerequisites
 
-### System Packages
+### Quick Setup (Recommended)
+The setup script automatically detects your OS and installs all dependencies:
 ```bash
-sudo apt install -y python3 python3-pip genisoimage syslinux-utils xorriso ansible
+# Linux
+sudo ./setup.sh
+
+# macOS (no sudo needed for Homebrew)
+./setup.sh
 ```
 
-### Python Packages
+### Manual Installation
+
+#### Ubuntu/Debian
 ```bash
+sudo apt install -y python3 python3-pip genisoimage syslinux-utils xorriso ansible
+pip3 install pyvmomi python-hpilo
+```
+
+#### macOS (via Homebrew)
+```bash
+brew install python3 cdrtools xorriso ansible
 pip3 install pyvmomi python-hpilo
 ```
 
@@ -24,14 +40,29 @@ ansible-galaxy collection install -r requirements.yml
 ```
 
 ### Directory Structure
-```bash
-# Create required directories
-sudo mkdir -p /home/deploy/isosrc      # Source ESXi ISO location
-sudo mkdir -p /home/deploy/baremetal   # Staging directory (temporary)
-sudo mkdir -p /home/stageiso           # Generated ISOs (served to BMC)
 
-# Set permissions
+The playbook auto-detects your OS and uses appropriate paths:
+
+| Purpose | Linux Path | macOS Path |
+|---------|-----------|------------|
+| Source ESXi ISO | `/home/deploy/isosrc/` | `/opt/esxi-deploy/isosrc/` |
+| Staging directory | `/home/deploy/baremetal/` | `/opt/esxi-deploy/baremetal/` |
+| Generated ISOs | `/home/stageiso/` | `/opt/stageiso/` |
+| Mount points | `/mnt/` | `/Volumes/esxi-mount/` |
+
+The setup script creates these directories automatically. To create manually:
+
+**Linux:**
+```bash
+sudo mkdir -p /home/deploy/isosrc /home/deploy/baremetal /home/stageiso
 sudo chmod 755 /home/stageiso
+```
+
+**macOS:**
+```bash
+sudo mkdir -p /opt/esxi-deploy/isosrc /opt/esxi-deploy/baremetal /opt/stageiso
+sudo chmod 755 /opt/stageiso
+sudo chown -R $(whoami):staff /opt/esxi-deploy /opt/stageiso
 ```
 
 ### CIFS Share Setup (Required for Dell iDRAC)
@@ -67,7 +98,11 @@ curl -k -u admin:password -X PATCH \
 
 ```bash
 # Setup (run once)
+# Linux:
 sudo ./setup.sh
+# macOS:
+./setup.sh
+
 ansible-galaxy collection install -r requirements.yml
 
 # Full deployment (ISO generation + BMC provisioning)
@@ -83,15 +118,21 @@ sudo ansible-playbook playbook/00.ilo_iso_esxi.yaml --tags ilo
 ansible-playbook playbook/00.ilo_iso_esxi.yaml --syntax-check
 
 # Verify generated ISOs
+# Linux:
 ls -lh /home/stageiso/*.iso
+# macOS:
+ls -lh /opt/stageiso/*.iso
 ```
 
 ## Configuration
 
 ### Step 1: Place Source ESXi ISO
 ```bash
-# Copy your ESXi ISO to the source directory
+# Linux:
 cp VMware-ESXi-8.0.2-*.iso /home/deploy/isosrc/
+
+# macOS:
+cp VMware-ESXi-8.0.2-*.iso /opt/esxi-deploy/isosrc/
 ```
 
 ### Step 2: Configure Host Variables
@@ -110,6 +151,12 @@ hosts:
 ### Step 3: Configure Group Variables
 Edit `inventory/group_vars/ilo-esxi`:
 ```yaml
+# OS-aware paths (auto-detected, override if needed)
+# deploy_base_path: /home/deploy      # Linux default
+# deploy_base_path: /opt/esxi-deploy  # macOS default
+# iso_stage_path: /home/stageiso      # Linux default
+# iso_stage_path: /opt/stageiso       # macOS default
+
 # ESXi Configuration
 root_password: 'YourSecurePassword'
 global_vlan_id: 0                    # Set to 0 for untagged, or VLAN ID (e.g., 100)
@@ -125,7 +172,7 @@ ilo_user: admin
 ilo_pass: 'BMCPassword'
 ilo_state: boot_once
 
-# Source ISO filename (must exist in /home/deploy/isosrc/)
+# Source ISO filename (must exist in isosrc directory)
 src_iso_file: VMware-ESXi-8.0.2-22380479-HPE-802.0.0.11.5.0.6-Oct2023.iso
 
 # ISO serving method - CIFS share path (recommended for Dell iDRAC)
@@ -138,11 +185,11 @@ iso_web_server: //10.201.1.103/iso
 
 ### Workflow
 1. **ISO Generation** (`--tags iso`):
-   - Mount source ESXi ISO
+   - Mount source ESXi ISO (Linux: `mount -o loop`, macOS: `hdiutil attach`)
    - Modify boot.cfg to add Kickstart option
    - Generate per-host Kickstart file with network config
-   - Repackage ISO with genisoimage
-   - Apply isohybrid for UEFI compatibility
+   - Repackage ISO (Linux: `genisoimage`, macOS: `mkisofs`)
+   - Apply UEFI compatibility (Linux: `isohybrid`, macOS: `xorriso`)
    - Cleanup staging files
 
 2. **BMC Provisioning** (`--tags ilo`):
@@ -272,4 +319,29 @@ curl -k -u admin:password \
 - Installation typically takes 8-12 minutes depending on hardware
 - Servers can be powered on or off before running the playbook
 - ISO filenames match hostnames (e.g., `esxi01.example.com.iso`)
-- Generated ISOs are stored in `/home/stageiso/`
+- Generated ISOs are stored in `/home/stageiso/` (Linux) or `/opt/stageiso/` (macOS)
+- The playbook auto-detects OS and uses appropriate tools/paths
+- macOS support requires Homebrew for package management
+
+## Network Requirements
+
+### VPN Access
+- **iDRAC/iLO BMC network** typically requires VPN access
+- Ensure VPN is connected before running provisioning (`--tags ilo`)
+- The control machine must be able to reach both:
+  - BMC IP (iDRAC/iLO) for Redfish API commands
+  - ESXi management IP for verification (optional)
+
+## Platform-Specific Notes
+
+### macOS
+- Uses `hdiutil` for ISO mounting (instead of `mount -o loop`)
+- Uses `mkisofs` from cdrtools (instead of `genisoimage`)
+- Uses `xorriso` for UEFI compatibility (instead of `isohybrid`)
+- Paths default to `/opt/esxi-deploy/` and `/opt/stageiso/`
+- Setup script installs packages via Homebrew
+
+### Linux (Ubuntu/Debian/RHEL)
+- Uses standard Linux mount commands
+- Uses `genisoimage` and `isohybrid` from syslinux-utils
+- Paths default to `/home/deploy/` and `/home/stageiso/`

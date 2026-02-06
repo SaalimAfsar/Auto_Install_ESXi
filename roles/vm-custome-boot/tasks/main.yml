@@ -5,16 +5,16 @@
 
 - name: Add kickstart option to root boot.cfg
   lineinfile:
-          path: /home/deploy/baremetal/{{ item.hostName }}/boot.cfg
-          regexp: '^kernelopt='
-          line: 'kernelopt=runweasel cdromBoot ks=cdrom:/KS.CFG'
+    path: "{{ file_path }}/{{ item.hostName }}/boot.cfg"
+    regexp: '^kernelopt='
+    line: 'kernelopt=runweasel cdromBoot ks=cdrom:/KS.CFG'
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"
 
 - name: Add kickstart option to EFI boot.cfg
   lineinfile:
-          path: /home/deploy/baremetal/{{ item.hostName }}/efi/boot/boot.cfg
-          regexp: '^kernelopt='
-          line: 'kernelopt=runweasel cdromBoot ks=cdrom:/KS.CFG'
+    path: "{{ file_path }}/{{ item.hostName }}/efi/boot/boot.cfg"
+    regexp: '^kernelopt='
+    line: 'kernelopt=runweasel cdromBoot ks=cdrom:/KS.CFG'
   with_items:
-          - "{{ hosts }}"
+    - "{{ hosts }}"

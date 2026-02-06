@@ -1,3 +1,4 @@
 ---
-
-file_path: /home/deploy/baremetal/
+# Use OS-aware paths from group_vars, with fallback defaults
+file_path: "{{ deploy_base_path | default('/home/deploy') }}/baremetal"
+mount_path: "{{ mount_base_path | default('/mnt') }}"
