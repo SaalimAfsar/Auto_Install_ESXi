@@ -1,0 +1,32 @@
+---
+###### Group Vars for ILO Provisioning ########
+###### ESXI info
+# Passwords are loaded from environment variables or vault
+# Set: export ESXI_ROOT_PASSWORD='your_password'
+# Or use: ansible-playbook ... --ask-vault-pass (with secrets.yml)
+root_password: "{{ lookup('env', 'ESXI_ROOT_PASSWORD') | default(vault_root_password, true) }}"
+global_vlan_id: 0
+global_netmask: 255.255.255.192
+global_gw: 23.106.34.254
+global_dns1: 8.8.8.8
+global_dns2: 1.1.1.1
+global_ntp1: pool.ntp.org
+global_ntp2: time.google.com
+
+
+###### HPE ILO info #The iLO user's privilage have to access as Administrator
+# Set: export ILO_USER='admin' and export ILO_PASSWORD='your_password'
+ilo_user: "{{ lookup('env', 'ILO_USER') | default(vault_ilo_user, true) | default('admin', true) }}"
+ilo_pass: "{{ lookup('env', 'ILO_PASSWORD') | default(vault_ilo_pass, true) }}"
+ilo_state: boot_once
+
+###### Path on Remote server (ISO Name)
+src_iso_file: VMware-ESXi-8.0.2-22380479-HPE-802.0.0.11.5.0.6-Oct2023.iso
+
+###### Web Server Configuration for ISO serving
+# Update this with your web server URL and port
+# The web server should serve files from /home/stageiso/ directory
+iso_web_server: //10.201.1.103/iso
+# Alternative examples:
+# iso_web_server: http://192.168.1.100:8080
+# iso_web_server: http://your-server.example.com

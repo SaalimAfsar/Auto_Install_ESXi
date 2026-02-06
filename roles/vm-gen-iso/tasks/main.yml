@@ -1,0 +1,21 @@
+---
+
+- name: Generate bootable ESXi ISO using genisoimage
+  shell: >
+          genisoimage
+          -o {{ iso_path }}/{{ item.hostName }}.iso
+          -relaxed-filenames
+          -J
+          -R
+          -V 'ESXI-INSTALLER'
+          -b isolinux.bin
+          -c boot.cat
+          -no-emul-boot
+          -boot-load-size 4
+          -boot-info-table
+          -eltorito-alt-boot
+          -e efiboot.img
+          -no-emul-boot
+          "{{ file_path }}"/{{ item.hostName }}/
+  with_items:
+          - "{{ hosts }}"

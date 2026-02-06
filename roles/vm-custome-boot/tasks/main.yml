@@ -1,0 +1,20 @@
+---
+
+# Modify the original boot.cfg to add kickstart option instead of replacing it
+# This ensures compatibility with any ESXi version
+
+- name: Add kickstart option to root boot.cfg
+  lineinfile:
+          path: /home/deploy/baremetal/{{ item.hostName }}/boot.cfg
+          regexp: '^kernelopt='
+          line: 'kernelopt=runweasel cdromBoot ks=cdrom:/KS.CFG'
+  with_items:
+          - "{{ hosts }}"
+
+- name: Add kickstart option to EFI boot.cfg
+  lineinfile:
+          path: /home/deploy/baremetal/{{ item.hostName }}/efi/boot/boot.cfg
+          regexp: '^kernelopt='
+          line: 'kernelopt=runweasel cdromBoot ks=cdrom:/KS.CFG'
+  with_items:
+          - "{{ hosts }}"

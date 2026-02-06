@@ -1,0 +1,22 @@
+---
+
+- name: Make ISO file UEFI bootable
+  shell: |
+          isohybrid --uefi {{ iso_path }}/{{ item.hostName }}.iso
+  with_items:
+          - "{{ hosts }}"
+  ignore_errors: yes
+
+- name: Verify ISO was created
+  stat:
+    path: "{{ iso_path }}/{{ item.hostName }}.iso"
+  with_items:
+          - "{{ hosts }}"
+  register: iso_stat
+
+- name: Display ISO info
+  debug:
+    msg: "ISO created: {{ iso_path }}/{{ item.item.hostName }}.iso ({{ item.stat.size | default(0) | human_readable }})"
+  loop: "{{ iso_stat.results }}"
+  loop_control:
+    label: "{{ item.item.hostName }}"

@@ -1,0 +1,6 @@
+---
+hosts:
+  - hostName: localhost.localdomain
+    esxi_ip: 23.106.34.212
+    ilo_ip: 10.201.1.95
+

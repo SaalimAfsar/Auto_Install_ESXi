@@ -1,0 +1,13 @@
+---
+
+- name: Using HPE iLO to {{ ilo_state }} target physical servers
+  hpilo_boot:
+          host: "{{ item.ilo_ip }}"
+          login: "{{ ilo_user }}"
+          password: "{{ ilo_pass }}"
+          state: "{{ ilo_state }}"
+          media: cdrom
+          image: "{{ iso_web_server }}/{{ item.hostName }}.iso"
+  delegate_to: localhost
+  with_items:
+          - "{{ hosts }}"

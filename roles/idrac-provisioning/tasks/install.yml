@@ -1,0 +1,234 @@
+---
+# Installation tasks - called with retry logic from main.yml
+
+- name: "Attempt {{ attempt_number }} of {{ max_attempts }} - Starting ESXi installation"
+  debug:
+    msg: "Starting installation attempt {{ attempt_number }}..."
+  when: (install_attempt | int) == (attempt_number | int)
+
+- name: Skip if already succeeded
+  meta: end_host
+  when: (install_attempt | int) > (max_attempts | int) or (esxi_install_success is defined and esxi_install_success)
+
+- block:
+    - name: Eject any existing virtual media
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.EjectMedia"
+        method: POST
+        body: {}
+        body_format: json
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [200, 201, 202, 204, 400, 404, 500]
+      delegate_to: localhost
+      with_items:
+        - "{{ hosts }}"
+      ignore_errors: yes
+
+    - name: Mount ISO via iDRAC Redfish API
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
+        method: POST
+        body: |
+          {
+            "Image": "{{ iso_web_server }}/{{ item.hostName }}.iso",
+            "Inserted": true,
+            "WriteProtected": true
+          }
+        body_format: json
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [200, 201, 202, 204, 400, 500]
+        return_content: yes
+      delegate_to: localhost
+      register: mount_result
+      with_items:
+        - "{{ hosts }}"
+      failed_when: false
+
+    - name: Verify virtual media is mounted
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD"
+        method: GET
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        return_content: yes
+      delegate_to: localhost
+      register: media_status
+      with_items:
+        - "{{ hosts }}"
+
+    - name: Set one-time boot to virtual CD/DVD
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Systems/System.Embedded.1"
+        method: PATCH
+        body:
+          Boot:
+            BootSourceOverrideEnabled: "Once"
+            BootSourceOverrideTarget: "Cd"
+            BootSourceOverrideMode: "UEFI"
+        body_format: json
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [200, 201, 202, 204]
+      delegate_to: localhost
+      with_items:
+        - "{{ hosts }}"
+
+    - name: Get current power state
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Systems/System.Embedded.1"
+        method: GET
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        return_content: yes
+      delegate_to: localhost
+      register: power_state
+      with_items:
+        - "{{ hosts }}"
+
+    - name: Power on server (if off)
+      uri:
+        url: "https://{{ item.item.ilo_ip }}/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+        method: POST
+        body:
+          ResetType: "On"
+        body_format: json
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [200, 201, 202, 204]
+      delegate_to: localhost
+      loop: "{{ power_state.results }}"
+      when: item.json.PowerState == "Off"
+
+    - name: Restart server (if already on)
+      uri:
+        url: "https://{{ item.item.ilo_ip }}/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset"
+        method: POST
+        body:
+          ResetType: "ForceRestart"
+        body_format: json
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [200, 201, 202, 204]
+      delegate_to: localhost
+      loop: "{{ power_state.results }}"
+      when: item.json.PowerState == "On"
+
+    - name: Wait for server to be powered ON
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Systems/System.Embedded.1"
+        method: GET
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        return_content: yes
+      delegate_to: localhost
+      register: power_on_check
+      with_items:
+        - "{{ hosts }}"
+      until: power_on_check.json.PowerState == "On"
+      retries: 30
+      delay: 10
+
+    - name: Server is ON - installation in progress
+      debug:
+        msg: "Server {{ item.hostName }} is powered ON. ESXi installation running..."
+      with_items:
+        - "{{ hosts }}"
+
+    - name: Wait 8 minutes for ESXi installation
+      pause:
+        minutes: 8
+
+    - name: Poll for server reboot (installation complete)
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Systems/System.Embedded.1"
+        method: GET
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        return_content: yes
+      delegate_to: localhost
+      register: reboot_check
+      with_items:
+        - "{{ hosts }}"
+      until: reboot_check.json.PowerState == "Off" or reboot_check.json.PowerState == "PoweringOff" or reboot_check.json.PowerState == "PoweringOn"
+      retries: 20
+      delay: 30
+      ignore_errors: yes
+
+    - name: Eject virtual media
+      uri:
+        url: "https://{{ item.ilo_ip }}/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.EjectMedia"
+        method: POST
+        body: {}
+        body_format: json
+        user: "{{ ilo_user }}"
+        password: "{{ ilo_pass }}"
+        force_basic_auth: yes
+        validate_certs: no
+        status_code: [200, 201, 202, 204, 400, 404]
+      delegate_to: localhost
+      with_items:
+        - "{{ hosts }}"
+
+    - name: Waiting for ESXi to boot from local disk
+      debug:
+        msg: "Virtual media ejected. Waiting for ESXi at {{ item.esxi_ip }}"
+      with_items:
+        - "{{ hosts }}"
+
+    - name: Wait for ESXi host to be reachable (up to 10 minutes)
+      wait_for:
+        host: "{{ item.esxi_ip }}"
+        port: 443
+        timeout: 600
+        state: started
+      delegate_to: localhost
+      with_items:
+        - "{{ hosts }}"
+      register: esxi_reachable
+
+    - name: Mark installation as successful
+      set_fact:
+        esxi_install_success: true
+        install_attempt: "{{ (max_attempts | int) + 1 }}"
+
+    - name: Installation complete
+      debug:
+        msg: "ESXi installation complete! Access at https://{{ item.esxi_ip }}"
+      with_items:
+        - "{{ hosts }}"
+
+  rescue:
+    - name: Installation attempt failed
+      debug:
+        msg: "Installation attempt {{ attempt_number }} failed. {% if (attempt_number | int) < (max_attempts | int) %}Retrying...{% else %}No more retries left.{% endif %}"
+
+    - name: Increment attempt counter
+      set_fact:
+        install_attempt: "{{ (attempt_number | int) + 1 }}"
+
+    - name: Fail if max attempts reached
+      fail:
+        msg: "ESXi installation failed after {{ max_attempts }} attempts. Check iDRAC console for details."
+      when: (attempt_number | int) >= (max_attempts | int)
+
+  when: (install_attempt | int) == (attempt_number | int)

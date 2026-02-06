@@ -1,0 +1,7 @@
+---
+# Ansible Collections Requirements
+collections:
+  - name: community.general
+    version: ">=7.0.0"
+  - name: hpe.ilo
+    version: ">=1.0.0"

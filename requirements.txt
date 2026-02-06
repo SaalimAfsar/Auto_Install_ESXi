@@ -1,0 +1,5 @@
+pyvmomi
+git+https://github.com/vmware/vsphere-automation-sdk-python.git
+python-hpilo
+ansible
+ansible-core

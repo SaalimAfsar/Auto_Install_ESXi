@@ -1,0 +1,6 @@
+### ILO Provisioning ###
+[ilo-esxi]
+ilo-esxi ansible_connection=local ansible_host=localhost
+
+[hpe-ilo]
+esxi-ilo1
