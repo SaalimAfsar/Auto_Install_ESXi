@@ -1,0 +1,21 @@
+---
+# Example host configuration - copy to 'ilo-esxi' and customize
+#
+# Each host entry defines a server to deploy ESXi on:
+#   - hostName: The ESXi hostname (also used for ISO filename)
+#   - esxi_ip: The management IP address for ESXi
+#   - ilo_ip: The BMC IP address (Dell iDRAC or HPE iLO)
+
+hosts:
+  - hostName: esxi01.example.com
+    esxi_ip: 192.168.1.10
+    ilo_ip: 10.0.0.10
+
+  - hostName: esxi02.example.com
+    esxi_ip: 192.168.1.11
+    ilo_ip: 10.0.0.11
+
+  # Add more servers as needed:
+  # - hostName: esxi03.example.com
+  #   esxi_ip: 192.168.1.12
+  #   ilo_ip: 10.0.0.12

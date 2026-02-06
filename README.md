@@ -1,271 +1,349 @@
-# ESXi8u1 Automated Installation on Baremetal
-This repository provides a fully automated solution for installing the ESXi8u1 operating system on HPE physical servers using iLO. With this code, you can effortlessly deploy ESXi servers by simply completing the variables and running the main playbook on your Ansible server. Say goodbye to manual installation hassles and hello to streamlined and efficient deployment!
+# Auto Install ESXi
 
-### 📖 Full Article on Medium
-[Medium/salehmiri90](https://medium.com/@salehmiri90/production-ready-esxi-deployment-by-ansible-without-human-interaction-a32011689a49) 
+Automated VMware ESXi deployment on bare metal servers using Ansible. Supports both **macOS** and **Linux** control nodes, with provisioning via **Dell iDRAC** and **HPE iLO**.
 
-###  Video Demo on Youtube
+## Features
 
-## Description
-In this code, I’m using Kickstart without PXE to do the ESXi version 8u1 installation over Baremetal servers (HPE Gen10 with iLO and Dell with iDRAC) and do the post configuration to set NTP and etc. 
-I wrote custom roles to define the main playbook, so please star this code to easily find it later.
+- **Cross-Platform**: Works on macOS (Darwin) and Linux (Ubuntu, RHEL, etc.)
+- **Multi-Vendor BMC Support**: Dell iDRAC (Redfish API) and HPE iLO
+- **Automated ISO Generation**: Creates custom bootable ISOs with embedded Kickstart files
+- **Zero-Touch Deployment**: Fully automated from ISO creation to ESXi boot
+- **Secure Credentials**: Environment variables or Ansible Vault for secrets
 
-## Technologies and Tools
-ESXi installation process can be simplified by means of Kickstart Installation method This method utilizes so called Kickstart File, which describes the configuration, required setup and post installation tasks for Kickstart installation.
-Kickstart File can be placed in the remote repository, accessible via NFS, HTTP, FTP, etc…, or can be included in ISO image, which is pretty convenient to store a Kickstart File.
+## Quick Start
 
-## How it's works
-In this tutorial we downloaded original ESXi8u1 ISO image then run one playbook file which has two block and 7 roles to mount iso in the Linux file system, modify it by adding Kickstart File `ks.cfg` and re-pack it to create custom UEFI bootable ESXi8u1 ISO image using `mkisofs` command.
+### 1. Clone the Repository
 
-My original ISO which I’m using to do below steps was included grub menu modifying as `ins.ks=cdrom:/KS.CFG`
+```bash
+git clone https://github.com/SaalimAfsar/Auto_Install_ESXi.git
+cd Auto_Install_ESXi
+```
 
-## Why use this project?
-⭐ Automate the VM creation and OS installation process
+### 2. Run Setup Script
 
-⭐ Save time and effort
+The setup script automatically detects your OS and installs all dependencies:
 
-⭐ Reduce the risk of human error
+```bash
+# macOS
+./setup.sh
 
-### Project Requirements
-⭐ A server running the Linux operating system is required to function as the control node. (This codes had been tested on Red Hat 8.6).
+# Linux (requires sudo)
+sudo ./setup.sh
+```
 
-⭐ Install Ansible on your control node.
+This installs:
+- **macOS**: xorriso, cdrtools (mkisofs), ansible via Homebrew
+- **Linux**: genisoimage, syslinux-utils, xorriso, ansible via apt/yum
 
-⭐ Install `pyvmomi` and configure it on control node.
+### 3. Place Source ESXi ISO
 
-⭐ Install VMware SDK for integration.
-````
-pip install git+https://github.com/vmware/vsphere-automation-sdk-python.git
-````
-⭐ Grant administrative privileges to a user on the VMware environment from the Ansible control node.
+```bash
+# macOS
+cp /path/to/VMware-ESXi-8.0.x.iso /opt/esxi-deploy/isosrc/
 
-## Start to Use this code
-### Step 1: Transfer codes to you Ansible Server
-&#9745; To clone this repository from my GitHub using the command line, you can use the following command:
-````
-git clone https://github.com/salehmiri90/VMware_Automation.git
-````
+# Linux
+sudo cp /path/to/VMware-ESXi-8.0.x.iso /home/deploy/isosrc/
+```
 
-&#9745; Use the 'mv' command to move the contents of the cloned directory 'VMware_Automation' to '/etc/ansible' as follows: 
-````
-mv -r VMware_Automation/Auto_Install_ESXi/* /etc/ansible/
-````
+### 4. Configure Your Servers
 
-&#9745; Verify that the files exist in the destination path '/etc/ansible' by first changing to the directory using the 'cd' command: 
-````
-cd /etc/ansible/
-````
-And then listing the contents with the command: 
-````
-ll
-````
-&#9745; Set a hostname for your server on your control node's hosts file located in `vi /etc/hosts`. For example:
-````
-192.168.1.1  ilo-esxi
-````
+Edit `inventory/host_vars/ilo-esxi` to define your servers:
 
-&#9745; Verify that the DNS name 'ilo-esxi' is properly set on your control node by attempting to ping it using the command:
-````
-ping ilo-esxi
-````
-### Step 2: Defining Hosts Variables
-&#9745; In the Ansible hosts inventory located in the below path, place the name of your server, 'ilo-esxi', under [ilo-esxi].
-````
-vi /etc/ansible/inventory/hosts
-````
-````yml
-[ilo-esxi]
-ilo-esxi
-````
-&#9745; In the Ansible inventory esxi host variables located in the below path, place details about esxi hosts which you want to install OS on those.
-````
-vi /etc/ansible/inventory/host_vars/ilo-esxi.yml
-````
-````yml
+```yaml
+---
 hosts:
-  - hostName: srv33.saleh.miri.local
-    esxi_ip: 1.6.29.9
-    ilo_ip: 1.18.66.9
+  - hostName: esxi01.example.com    # ESXi hostname (used for ISO filename)
+    esxi_ip: 192.168.1.10           # ESXi management IP
+    ilo_ip: 10.0.0.10               # BMC IP (iDRAC/iLO)
 
-  - hostName: srv34.saleh.miri.local
-    esxi_ip: 1.6.29.10
-    ilo_ip: 1.18.66.10
-````
+  - hostName: esxi02.example.com    # Add more servers as needed
+    esxi_ip: 192.168.1.11
+    ilo_ip: 10.0.0.11
+```
 
-### Step 3: Defining Group Variables
-&#9745; Modify the esxi hosts and iLO authentication details in the below directory. In this file, update the `esxi root password`, `esxi vlan id`, `esxi netmask`, `esxi dns`, `esxi ntp`, `ilo password` and `name of iso file` parameters as I have done.
-````
-vi /etc/ansible/inventory/group_vars/ilo-esxi.yml
-````
-````yml
-root_password: 'password'
-global_vlan_id: 1146
+Edit `inventory/group_vars/ilo-esxi` to set network configuration:
+
+```yaml
+---
+# ESXi Network Configuration
+global_vlan_id: 0                    # 0 for untagged, or VLAN ID (e.g., 100)
 global_netmask: 255.255.255.0
-global_gw: 1.6.20.26
-global_dns1: 1.6.20.1
-global_dns2: 1.6.20.2
-global_ntp1: 1.6.20.4
-global_ntp2: 1.6.20.5
+global_gw: 192.168.1.1
+global_dns1: 8.8.8.8
+global_dns2: 1.1.1.1
+global_ntp1: pool.ntp.org
+global_ntp2: time.google.com
 
-ilo_pass: password
+# Source ISO filename (must exist in isosrc directory)
+src_iso_file: VMware-ESXi-8.0.2-22380479.iso
 
-src_iso_file: VMware-ESXi-8.0.1.iso
-````
+# ISO serving - CIFS share for Dell iDRAC (recommended)
+iso_web_server: //YOUR_SERVER_IP/iso
+```
 
-### Step 4: Running Playbooks 
-&#9745; There is only one playbook that needs to be executed.
+### 5. Set Credentials
 
-&#9745; Navigate to the playbook directory using the command:
-````
-cd /etc/ansible/playbooks/
-````
-Notice❗️ The physical HPE servers have to be powered off before execute below command.
+**Option A: Environment Variables (Recommended)**
 
-&#9745; Then execute all parts with a single command using 
-````
-ansible-playbook ilo_iso_esxi.yaml
-````
+```bash
+export ESXI_ROOT_PASSWORD='YourSecurePassword'
+export ILO_USER='admin'
+export ILO_PASSWORD='BMCPassword'
+```
 
-## Playbook Steps
-&#9745; 1st role: copy-iso-mount
+**Option B: Ansible Vault**
 
-Mounting and copy cdrom items will do in this role.
+```bash
+# Create encrypted secrets file
+ansible-vault create inventory/group_vars/secrets.yml
+```
 
-````yml
-mkdir /mnt/{{ item.hostName }}
-mount -o loop -t iso9660 {{ isosrc }}/{{ src_iso_file }} /mnt/{{ item.hostName }}/
-mkdir {{ file_path }}/{{ item.hostName }}
-cp -avRf /mnt/{{ item.hostName }}/* {{ file_path }}/{{ item.hostName }}/
-````
-&#9745; 2nd role: vm-custome-boot
+Add to secrets.yml:
+```yaml
+vault_root_password: 'YourSecurePassword'
+vault_ilo_user: 'admin'
+vault_ilo_pass: 'BMCPassword'
+```
 
-In this step, I remove boot.cfg file from root and efi/boot directories, then put custom boot file to both destinations.
+### 6. Run the Playbook
 
-````yml
-rm -f /home/deploy/baremetal/{{ item.hostName }}/boot.cfg
-rm -f /home/deploy/baremetal/{{ item.hostName }}/efi/boot/boot.cfg
-````
+```bash
+# Full deployment (ISO generation + BMC provisioning)
+ansible-playbook playbook/00.ilo_iso_esxi.yaml
 
-````yml
-copy:
-          src: BOOT.CFG
-          dest: /home/deploy/baremetal/{{ item.hostName }}/
-          remote_src: no
-          owner: root
-          group: root
-          mode: '0744'
-````
+# ISO generation only
+ansible-playbook playbook/00.ilo_iso_esxi.yaml --tags iso
 
-````yml
-copy:
-          src: BOOT.CFG
-          dest: /home/deploy/baremetal/{{ item.hostName }}/efi/boot/
-          remote_src: no
-          owner: root
-          group: root
-          mode: '0744'
-````
+# BMC provisioning only (requires pre-generated ISOs)
+ansible-playbook playbook/00.ilo_iso_esxi.yaml --tags ilo
 
-&#9745; 3rd role: vm-ks
+# With Ansible Vault
+ansible-playbook playbook/00.ilo_iso_esxi.yaml --ask-vault-pass
+```
 
-In this step the Kickstart content for each host will be create and after that I set some esxi post configuration in this file. For example disable IPv6, set ntp service up and run, set secondary dns ip address will do here. 
+## Project Structure
 
-````yml
-  copy:
-          force: yes
-          dest: /home/deploy/baremetal/{{ item.hostName }}/KS.CFG
-          content: |
-                  vmaccepteula
-                  clearpart --firstdisk=local --overwritevmfs
-                  install --firstdisk=local --overwritevmfs
-                  rootpw {{ root_password }}
-                  network --bootproto=static --addvmportgroup=1 --vlanid={{ global_vlan_id }} --ip={{ item.esxi_ip }} --netmask={{ global_netmask }} --gateway={{ global_gw }} --nameserver={{ global_dns1 }} --hostname={{ item.hostName }}
-                  %firstboot --interpreter=busybox
-                  vim-cmd hostsvc/enable_ssh
-                  vim-cmd hostsvc/start_ssh
-                  vim-cmd hostsvc/enable_esx_shell
-                  vim-cmd hostsvc/start_esx_shell
-                  esxcli system module parameters set -m tcpip6 -p ipv6=0
-                  esxcli network ip set --ipv6-enabled=false
-                  esxcli system ntp set --server={{ global_ntp1 }} --server={{ global_ntp2 }}
-                  esxcli network ip dns server add --server={{ global_dns2 }}
-                  esxcli system ntp set --enabled=true
-                  esxcli system ntp start
-                  #esxcli system settings advanced set -o /UserVars/HostClientCEIPEnabled -i 0
-                  reboot
-````
+```
+Auto_Install_ESXi/
+├── setup.sh                    # OS-aware setup script
+├── ansible.cfg                 # Ansible configuration
+├── requirements.yml            # Ansible Galaxy collections
+├── requirements.txt            # Python dependencies
+├── playbook/
+│   └── 00.ilo_iso_esxi.yaml   # Main orchestration playbook
+├── inventory/
+│   ├── hosts                   # Ansible inventory
+│   ├── host_vars/
+│   │   └── ilo-esxi           # Per-server configuration
+│   └── group_vars/
+│       ├── ilo-esxi           # Global settings
+│       └── secrets.yml        # Encrypted credentials (create this)
+└── roles/
+    ├── copy-iso-mount/        # Mount source ISO, copy to staging
+    ├── vm-custome-boot/       # Add Kickstart option to boot.cfg
+    ├── vm-ks/                 # Generate per-host Kickstart file
+    ├── vm-gen-iso/            # Create bootable ISO
+    ├── iso-uefi/              # Apply UEFI compatibility
+    ├── clean-stage/           # Cleanup staging files
+    ├── idrac-provisioning/    # Dell iDRAC provisioning
+    └── ilo-provisioning/      # HPE iLO provisioning
+```
 
-&#9745; 4th role: vm-gen-iso
+## Directory Paths by OS
 
-Using mkisofs command to create an ISO and put on the specific path which can located by nginx webserver.
+| Purpose | macOS | Linux |
+|---------|-------|-------|
+| Source ISO | `/opt/esxi-deploy/isosrc/` | `/home/deploy/isosrc/` |
+| Staging | `/opt/esxi-deploy/baremetal/` | `/home/deploy/baremetal/` |
+| Generated ISOs | `/opt/stageiso/` | `/home/stageiso/` |
 
-````yml
-  shell: >
-          mkisofs
-          -o {{ iso_path }}/{{ item.hostName }}.iso
-          -relaxed-filenames
-          -J
-          -R
-          -b isolinux.bin
-          -c boot.cat
-          -no-emul-boot
-          -boot-load-size 4
-          -boot-info-table
-          -eltorito-alt-boot
-          -e efiboot.img
-          -boot-load-size 1
-          -no-emul-boot
-          "{{ file_path }}"/{{ item.hostName }}/
-````
-&#9745; 5th role: iso-uefi
+## Dell iDRAC Setup
 
-Using isohybrid command to force iso to be compatible with uefi and bios methods. 
+### Enable Virtual Media
 
-````yml
-sudo isohybrid --uefi {{ iso_path }}/{{ item.hostName }}.iso
-````
+Before running the playbook, enable Virtual Media on iDRAC:
 
-&#9745; 6th role: clean-stage
+**Via Web UI:**
+1. iDRAC Web UI → Configuration → Virtual Media
+2. Set "Attached Media" to **Attached** or **Auto-Attach**
 
-Clear the stage and delete unnecessary files except created ISO files. 
+**Via Redfish API:**
+```bash
+curl -k -u admin:password -X PATCH \
+  https://IDRAC_IP/redfish/v1/Managers/iDRAC.Embedded.1/Attributes \
+  -H "Content-Type: application/json" \
+  -d '{"Attributes": {"VirtualMedia.1.Enable": "Enabled", "VirtualMedia.1.Attached": "Attached"}}'
+```
 
-````yml
-sudo umount /mnt/{{ item.hostName }}
-sudo rm -rf {{ file_path }}/{{ item.hostName }}
-sudo rm -rf /mnt/*
-````
-&#9745; 7th role: BMC provisioning (iLO or iDRAC)
+### CIFS Share Setup (Required for Dell iDRAC)
 
-Using group_vars to authenticate to the BMC (HPE iLO or Dell iDRAC) and use webserver path to mount related ISO to virtual media, then boot from it.
+Dell iDRAC requires CIFS for virtual media. Set up Samba on your file server:
 
-For HPE iLO (original behavior):
+```bash
+sudo apt install -y samba
 
-````yml
-  hpilo_boot:
-          host: "{{ item.ilo_ip }}"
-          login: "{{ ilo_user }}"
-          password: "{{ ilo_pass }}"
-          state: "{{ ilo_state }}"
-          media: cdrom
-          image: http://SALEH-WEBSERVER/{{ item.hostName }}.iso
-  delegate_to: localhost
-````
+# Add to /etc/samba/smb.conf:
+[iso]
+    path = /home/stageiso    # or /opt/stageiso on macOS
+    guest ok = yes
+    read only = yes
+    browseable = yes
+    force user = nobody
+    force group = nogroup
 
-For Dell iDRAC (via Redfish, added in this fork):
+sudo systemctl restart smbd
+```
 
-````yml
-  # In group_vars:
-  provisioning_method: idrac-provisioning
+Update `iso_web_server` in group_vars:
+```yaml
+iso_web_server: //YOUR_SERVER_IP/iso
+```
 
-  # The playbook loads roles/idrac-provisioning which:
-  # - Mounts ISO via Redfish VirtualMedia
-  # - Sets one-time boot to virtual CD/DVD
-  # - Powers on the server to start ESXi installation
-````
+## HPE iLO Setup
 
-# ✍️ Contribution
-I am confident that working together with skilled individuals like yourself can improve the functionality, efficiency, and overall quality of our projects. Therefore, I would be delighted to see any forks from this project. Please feel free to use this code and share any innovative ideas to enhance it further.
+HPE iLO supports HTTP for virtual media. Set up a simple web server:
 
-## ☎️ Contact information
-### 📧 salehmiri90@gmail.com
-### [Linkedin.com/in/salehmiri](https://www.linkedin.com/in/salehmiri)
+```bash
+# Using Python (for testing)
+cd /home/stageiso
+python3 -m http.server 8080
+
+# Or use nginx/apache for production
+```
+
+Update `iso_web_server` in group_vars:
+```yaml
+iso_web_server: http://YOUR_SERVER_IP:8080
+```
+
+## Workflow
+
+1. **ISO Generation** (`--tags iso`):
+   ```
+   Source ISO → Mount → Modify boot.cfg → Generate Kickstart → Create ISO → UEFI Hybrid → Cleanup
+   ```
+
+2. **BMC Provisioning** (`--tags ilo`):
+   ```
+   Eject Media → Mount ISO → Set Boot Order → Power On → Wait for Install → Eject → Verify ESXi
+   ```
+
+## Kickstart Configuration
+
+The generated Kickstart file (`KS.CFG`) configures:
+
+- Accept EULA automatically
+- Clear and install to first local disk
+- Set root password
+- Configure static network (IP, netmask, gateway, DNS, hostname)
+- VLAN tagging (if `global_vlan_id > 0`)
+- Auto-reboot after installation
+
+**Post-install (firstboot) scripts:**
+- Enable and start SSH
+- Enable and start ESXi Shell
+- Disable IPv6
+- Configure NTP servers
+- Add secondary DNS
+
+## Troubleshooting
+
+### "Virtual Media is detached"
+
+iDRAC Virtual Media Attach Mode not configured. Run:
+```bash
+curl -k -u admin:password -X PATCH \
+  https://IDRAC_IP/redfish/v1/Managers/iDRAC.Embedded.1/Attributes \
+  -H "Content-Type: application/json" \
+  -d '{"Attributes": {"VirtualMedia.1.Attached": "Attached"}}'
+```
+
+### "Fatal error 15 (Not found)" during boot
+
+boot.cfg module list doesn't match ISO contents. The playbook modifies the original boot.cfg instead of replacing it, ensuring compatibility.
+
+### "cannot find kickstart file on cd-rom with path -- /KS.CFG"
+
+Case sensitivity issue. The playbook preserves `KS.CFG` as uppercase while converting other files to lowercase for ISO9660 compatibility.
+
+### "Remote file location is not accessible"
+
+1. Verify network connectivity between BMC and file server
+2. Check firewall rules (CIFS: 445, HTTP: 80/8080)
+3. Test CIFS: `smbclient -L //SERVER_IP -N`
+
+### macOS: "xorriso not found"
+
+```bash
+brew install xorriso cdrtools
+```
+
+### Linux: "genisoimage not found"
+
+```bash
+# Ubuntu/Debian
+sudo apt install -y genisoimage syslinux-utils
+
+# RHEL/CentOS
+sudo yum install -y genisoimage syslinux
+```
+
+## Manual BMC Operations
+
+### Eject Virtual Media (iDRAC)
+```bash
+curl -k -u admin:password -X POST \
+  https://IDRAC_IP/redfish/v1/Managers/iDRAC.Embedded.1/VirtualMedia/CD/Actions/VirtualMedia.EjectMedia \
+  -H "Content-Type: application/json" -d '{}'
+```
+
+### Check Server Power State
+```bash
+curl -k -u admin:password \
+  https://IDRAC_IP/redfish/v1/Systems/System.Embedded.1 | jq '.PowerState'
+```
+
+### Restart Server
+```bash
+curl -k -u admin:password -X POST \
+  https://IDRAC_IP/redfish/v1/Systems/System.Embedded.1/Actions/ComputerSystem.Reset \
+  -H "Content-Type: application/json" \
+  -d '{"ResetType": "ForceRestart"}'
+```
+
+## Requirements
+
+### System Packages
+
+| Package | macOS (Homebrew) | Linux (apt) |
+|---------|------------------|-------------|
+| ISO creation | `cdrtools`, `xorriso` | `genisoimage`, `xorriso` |
+| UEFI support | `xorriso` | `syslinux-utils` |
+| Automation | `ansible` | `ansible` |
+
+### Python Packages
+
+```
+pyvmomi
+python-hpilo  # For HPE iLO only
+```
+
+### Ansible Collections
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+## License
+
+This project is open source. See the repository for license details.
+
+## Acknowledgments
+
+- Original project concept by [salehmiri90](https://github.com/salehmiri90)
+- Dell iDRAC Redfish integration added for this fork
+- macOS support added by [SaalimAfsar](https://github.com/SaalimAfsar)

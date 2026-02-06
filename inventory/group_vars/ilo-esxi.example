@@ -1,0 +1,46 @@
+---
+# Example group configuration - copy to 'ilo-esxi' and customize
+#
+# OS Detection for paths (auto-detected, override if needed)
+# Linux: /home/deploy, macOS: /opt/esxi-deploy
+deploy_base_path: "{{ '/opt/esxi-deploy' if ansible_facts['os_family'] == 'Darwin' else '/home/deploy' }}"
+iso_stage_path: "{{ '/opt/stageiso' if ansible_facts['os_family'] == 'Darwin' else '/home/stageiso' }}"
+mount_base_path: "{{ '/Volumes/esxi-mount' if ansible_facts['os_family'] == 'Darwin' else '/mnt' }}"
+
+###### ESXi Network Configuration ########
+# Passwords loaded from environment variables or vault
+# Set: export ESXI_ROOT_PASSWORD='your_password'
+# Or use Ansible Vault with secrets.yml
+root_password: "{{ lookup('env', 'ESXI_ROOT_PASSWORD') | default(vault_root_password, true) }}"
+
+# Network settings
+global_vlan_id: 0                    # Set to 0 for untagged, or VLAN ID (e.g., 100)
+global_netmask: 255.255.255.0
+global_gw: 192.168.1.1
+global_dns1: 8.8.8.8
+global_dns2: 1.1.1.1
+global_ntp1: pool.ntp.org
+global_ntp2: time.google.com
+
+###### BMC Credentials (iLO/iDRAC) ########
+# Set: export ILO_USER='admin' and export ILO_PASSWORD='your_password'
+ilo_user: "{{ lookup('env', 'ILO_USER') | default(vault_ilo_user, true) | default('admin', true) }}"
+ilo_pass: "{{ lookup('env', 'ILO_PASSWORD') | default(vault_ilo_pass, true) }}"
+ilo_state: boot_once
+
+###### Source ISO Configuration ########
+# Place your ESXi ISO in the isosrc directory and specify the filename here
+# macOS: /opt/esxi-deploy/isosrc/
+# Linux: /home/deploy/isosrc/
+src_iso_file: VMware-ESXi-8.0.2-22380479.iso
+
+###### ISO Serving Configuration ########
+# How the BMC accesses the generated ISOs
+#
+# For Dell iDRAC (requires CIFS/Samba):
+# iso_web_server: //192.168.1.100/iso
+#
+# For HPE iLO (supports HTTP):
+# iso_web_server: http://192.168.1.100:8080
+#
+iso_web_server: //YOUR_SERVER_IP/iso

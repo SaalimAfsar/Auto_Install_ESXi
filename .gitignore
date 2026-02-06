@@ -14,6 +14,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.env
 
 # IDE
 .idea/
@@ -29,3 +30,13 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+
+# Generated ISOs (large files)
+*.iso
+
+# Mount points and staging (auto-created)
+/opt/esxi-deploy/
+/opt/stageiso/
+
+# Claude Code
+.claude/
